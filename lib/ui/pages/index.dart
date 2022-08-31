@@ -16,7 +16,7 @@ class IndexPage extends StatefulWidget {
 }
 
 class _IndexState extends State<IndexPage> {
-  final _channelController = TextEditingController();
+  final _channelController = TextEditingController(text: 'flutterappchannel');
   final _tokenController = TextEditingController();
   bool _useNewToken = false;
   bool _validateError = false;
