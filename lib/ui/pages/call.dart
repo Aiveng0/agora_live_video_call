@@ -3,16 +3,13 @@ import 'dart:developer';
 
 import 'package:agora_live_video_call/ui/widgets/local_video_placeholder.dart';
 import 'package:agora_live_video_call/ui/widgets/remote_video_placeholder.dart';
-import 'package:agora_live_video_call/ui/widgets/row_view_1.dart';
-import 'package:agora_live_video_call/ui/widgets/row_view_2.dart';
-import 'package:agora_live_video_call/ui/widgets/row_view_3.dart';
 import 'package:agora_live_video_call/ui/widgets/toolbar.dart';
 import 'package:agora_live_video_call/ui/widgets/view_section.dart';
+import 'package:agora_live_video_call/utils/settings.dart' as settings;
 import 'package:agora_rtc_engine/rtc_engine.dart';
-import 'package:flutter/material.dart';
 import 'package:agora_rtc_engine/rtc_local_view.dart' as rtc_local_view;
 import 'package:agora_rtc_engine/rtc_remote_view.dart' as rtc_remote_view;
-import 'package:agora_live_video_call/utils/settings.dart' as settings;
+import 'package:flutter/material.dart';
 
 class CallPage extends StatefulWidget {
   const CallPage({
@@ -32,7 +29,6 @@ class _CallPageState extends State<CallPage> {
   final _allUsers = <int>[];
   final _usersWithVideo = <int>[];
 
-  final _infoStrings = <String>[];
   bool muted = false;
   bool showVideo = false;
   bool viewPanel = false;
@@ -55,16 +51,12 @@ class _CallPageState extends State<CallPage> {
 
   Future<void> initialize() async {
     if (settings.appId.isEmpty) {
-      setState(() {
-        _infoStrings.add(
-          'APP_ID missing, please provide your APP_ID in settings.dart',
-        );
-      });
       return;
     }
 
     /// _initAgoraRtcEngine
     _engine = await RtcEngine.create(settings.appId);
+
     await _engine.enableVideo();
     await _engine.muteLocalVideoStream(!showVideo);
     await _engine.enableLocalVideo(showVideo);
@@ -73,9 +65,13 @@ class _CallPageState extends State<CallPage> {
 
     /// _addAgoraEventHandlers
     _addAgoraEventHandlers();
+    
     VideoEncoderConfiguration configuration = VideoEncoderConfiguration();
     configuration.dimensions = const VideoDimensions(width: 1920, height: 1080);
     await _engine.setVideoEncoderConfiguration(configuration);
+
+    /// Enables the reporting of users' volume indication.
+    await _engine.enableAudioVolumeIndication(300, 5, true);
     await _engine.joinChannel(settings.token, widget.channelName!, null, 0);
   }
 
@@ -83,24 +79,17 @@ class _CallPageState extends State<CallPage> {
     _engine.setEventHandler(
       RtcEngineEventHandler(
         error: (code) {
-          setState(() {
-            final String info = 'Error: $code';
-            _infoStrings.add(info);
-          });
+          log('Error: $code');
         },
 
         /// Occurs when I join to channel
         joinChannelSuccess: (channel, uid, elapsed) {
-          setState(() {
-            final String info = 'Join Channel: $channel, uid: $uid';
-            _infoStrings.add(info);
-          });
+          setState(() {});
         },
 
         /// Occurs when I leave from channel.
         leaveChannel: (stats) {
           setState(() {
-            _infoStrings.add('Leave Channel');
             _usersWithVideo.clear();
             _allUsers.clear();
           });
@@ -108,46 +97,65 @@ class _CallPageState extends State<CallPage> {
 
         /// Occurs when a remote user (COMMUNICATION)/ host (LIVE_BROADCASTING) joins the channel.
         userJoined: (uid, elapsed) {
+          log('userJoined: $uid');
           setState(() {
-            final String info = 'User Joined: uid = $uid';
-            _infoStrings.add(info);
             _allUsers.add(uid);
           });
         },
 
         /// Occurs when a remote user (COMMUNICATION)/ host (LIVE_BROADCASTING) leaves the channel.
         userOffline: (uid, reason) {
+          log('userOffline: $uid');
           setState(() {
-            final String info = 'User Offline: uid = $uid';
-            _infoStrings.add(info);
             _usersWithVideo.remove(uid);
             _allUsers.remove(uid);
           });
         },
 
-        /// Occurs when the first local video frame is rendered.
-        firstLocalVideoFrame: (width, height, elapsed) {
+        /// Occurs when the remote video state changes. This callback does not work properly when the number of users (in the voice/video call channel) or hosts (in the live streaming channel) in the channel exceeds 17.
+        remoteVideoStateChanged: (uid, state, reason, elapsed) {
+          log('remoteVideoStateChanged: uid => $uid, state => $state');
           setState(() {
-            final String info = 'First Remote Video: ${width}x$height';
-            _infoStrings.add(info);
+            if (state == VideoRemoteState.Stopped) {
+              if (_usersWithVideo.contains(uid)) {
+                _usersWithVideo.remove(uid);
+              }
+            }
+            if (state == VideoRemoteState.Starting) {
+              if (!_usersWithVideo.contains(uid)) {
+                _usersWithVideo.add(uid);
+              }
+            }
           });
         },
 
-        /// Occurs when the remote video state changes. This callback does not work properly when the number of users (in the voice/video call channel) or hosts (in the live streaming channel) in the channel exceeds 17.
-        remoteVideoStateChanged: (uid, state, reason, elapsed) {
-          if (state == VideoRemoteState.Stopped) {
-            if (_usersWithVideo.contains(uid)) {
-              _usersWithVideo.remove(uid);
-            }
-          }
-          if (state == VideoRemoteState.Starting) {
-            if (!_usersWithVideo.contains(uid)) {
-              _usersWithVideo.add(uid);
-            }
-          }
+        /// Occurs when the remote audio state changes. This callback does not work properly when the number of users (in the voice/video call channel) or hosts (in the live streaming channel) in the channel exceeds 17.
+        // remoteAudioStateChanged: (uid, state, reason, elapsed) {
+        //   setState(() {
+        //     if (state == AudioRemoteState.Starting) {
+        //       if (_usersWithVideo.contains(uid)) {
+        //         if (_usersWithVideo.contains(uid)) {
+        //           log("_usersWithVideo => ${_usersWithVideo.toString()}");
+        //           _usersWithVideo.remove(uid);
+        //           _usersWithVideo.insert(0, uid);
+        //           log("_usersWithVideo => ${_usersWithVideo.toString()}");
+        //         }
+        //       }
+        //     }
+        //   });
+        // },
+
+        /// Occurs when the most active speaker is detected. After a successful call of enableAudioVolumeIndication , the SDK continuously detects which remote user has the loudest volume.
+        activeSpeaker: (uid) {
           setState(() {
-            final String info = 'remoteVideoStateChanged: uid= $uid, state = $state';
-            _infoStrings.add(info);
+            log("activeSpeaker => $uid");
+
+            if (_usersWithVideo.contains(uid)) {
+              log("_usersWithVideo => ${_usersWithVideo.toString()}");
+              _usersWithVideo.remove(uid);
+              _usersWithVideo.insert(0, uid);
+              log("_usersWithVideo => ${_usersWithVideo.toString()}");
+            }
           });
         },
       ),
